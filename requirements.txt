@@ -1,0 +1,9 @@
+# Versions the forecast was built and tested with (Python 3.12). setup.sh installs them.
+pandas==3.1.1
+numpy==2.5.4
+lightgbm==4.7.0
+scikit-learn==1.9.1
+scipy==1.18.1
+yfinance==1.8.0
+holidays==0.108
+openpyxl==3.1.5

@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolarPot · power price forecast</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='10' fill='%230b0b0b'/%3E%3Cpath d='M7 23h5v-6h5v-5h5v9h7' fill='none' stroke='%23fcfcfb' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='27' cy='11' r='2.6' fill='%23eb6834'/%3E%3C/svg%3E">
+<script>
+  // before the first paint, so the page never flashes in the wrong theme
+  try { document.documentElement.dataset.theme = localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+  catch (e) { document.documentElement.dataset.theme = "light"; }
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f3f3ef; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #6b6963;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10); --wash: rgba(11,11,11,.05);
+  --forecast: #2a78d6; --actual: #eb6834; --wind: #1baf7a; --solar: #eda100; --neutral: #c3c2b7;
+  --band: rgba(42,120,214,.14); --good: #0ca30c; --warn: #fab219; --crit: #d03b3b;
+  --shadow: 0 1px 2px rgba(11,11,11,.04), 0 8px 24px rgba(11,11,11,.04);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #a09e96;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06);
+  --forecast: #3987e5; --actual: #d95926; --wind: #199e70; --solar: #c98500; --neutral: #52514e;
+  --band: rgba(57,135,229,.20); --shadow: none;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+h1, h2, p, dl, dd, figure { margin: 0; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--forecast); outline-offset: 2px; border-radius: 6px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 20px 40px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 20px 0 16px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand svg { width: 36px; height: 36px; flex: none; }
+.brand h1 { font-size: 18px; line-height: 1.2; font-weight: 650; letter-spacing: -.01em; }
+.brand p { font-size: 13px; color: var(--ink2); }
+.status { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--ink2); }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+.pill[data-state="live"] .dot { animation: pulse 2.4s ease-out infinite; }
+.pill[data-state="wait"] .dot { background: var(--warn); }
+.pill[data-state="down"] .dot { background: var(--crit); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,.5); } 100% { box-shadow: 0 0 0 8px rgba(12,163,12,0); } }
+#clock { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.icon-btn { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); transition: background .15s; }
+.icon-btn:hover { background: var(--wash); }
+.icon-btn svg { width: 18px; height: 18px; }
+#alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--crit); border-radius: 12px; background: var(--surface); font-size: 14px; }
+
+.grid { display: grid; gap: 16px; margin-bottom: 16px; }
+.g3 { grid-template-columns: 1.15fr 1fr 1fr; }
+.g2 { grid-template-columns: 1.35fr 1fr; }
+.card { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+.sub { font-size: 13px; color: var(--ink2); }
+.hero { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
+.hero b { font-size: clamp(48px, 5.4vw, 76px); line-height: 1; font-weight: 650; letter-spacing: -.03em; }
+.stat { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+.stat b { font-size: 36px; line-height: 1.1; font-weight: 650; letter-spacing: -.02em; }
+.unit { font-size: 15px; color: var(--ink2); }
+.spark { display: block; width: 100%; height: 56px; margin: 12px 0 4px; }
+.facts { margin-top: 12px; border-top: 1px solid var(--grid); }
+.facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: 14px; }
+.facts > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.facts dt { color: var(--ink2); }
+.facts dd { text-align: right; font-weight: 550; font-variant-numeric: tabular-nums; }
+.facts small { display: block; font-size: 12.5px; font-weight: 400; color: var(--ink2); }
+.delta { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-weight: 400; color: var(--ink2); white-space: nowrap; }
+.delta svg { width: 12px; height: 12px; }
+.versus { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px 12px; margin-top: 14px; font-size: 14px; }
+.versus span:nth-child(3n+1) { color: var(--ink2); }
+.versus strong { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.track { height: 8px; border-radius: 4px; background: var(--wash); overflow: hidden; }
+.track i { display: block; height: 100%; border-radius: 4px; background: var(--neutral); transition: width .3s ease-out; }
+.track i.ours { background: var(--forecast); }
+.verdict { margin-top: 12px; font-size: 14px; color: var(--ink2); }
+.verdict strong { color: var(--ink); }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 8px 0 16px; }
+.bar > span { font-size: 13px; color: var(--ink2); }
+.seg { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.seg button { min-height: 36px; padding: 6px 14px; border: 0; border-radius: 9px; background: none; font-size: 14px; color: var(--ink2); transition: background .15s, color .15s; }
+.seg button:hover { background: var(--wash); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 20px; margin-bottom: 12px; }
+.head h2 { font-size: 17px; line-height: 1.3; font-weight: 650; letter-spacing: -.01em; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.key { display: inline-block; width: 16px; height: 2px; border-radius: 1px; flex: none; }
+.key.box { height: 10px; border-radius: 2px; }
+svg.chart { display: block; width: 100%; outline-offset: 4px; touch-action: pan-y; }
+svg.chart text { font-size: 12px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg.chart .ink { fill: var(--ink2); }
+details { margin-top: 12px; font-size: 14px; }
+summary { display: inline-block; padding: 8px 0; color: var(--ink2); cursor: pointer; }
+summary:hover { color: var(--ink); }
+.scroll { max-height: 340px; overflow: auto; border: 1px solid var(--grid); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child { text-align: left; }
+th { position: sticky; top: 0; background: var(--surface); font-weight: 600; color: var(--ink2); }
+
+.fill { display: flex; flex-direction: column; }
+#heat { flex: 1; display: flex; min-height: 150px; }
+.heat { flex: 1; display: grid; grid-template-rows: auto repeat(4, minmax(20px, 1fr)); gap: 2px; font-size: 12px; color: var(--muted); }
+.heat span { display: flex; align-items: center; min-height: 16px; white-space: nowrap; }
+.heat span.q { justify-content: flex-end; padding-right: 6px; }
+.heat i { display: block; border-radius: 3px; background: var(--wash); }
+.heat i:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.scale { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.scale i { flex: 1; max-width: 220px; height: 8px; border-radius: 4px; }
+.rows { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px 12px; font-size: 14px; }
+.rows span { color: var(--ink2); white-space: nowrap; }
+.rows span.me { color: var(--ink); font-weight: 600; }
+.rows strong { font-weight: 550; font-variant-numeric: tabular-nums; text-align: right; }
+.rows .lane { position: relative; height: 12px; }
+.rows .lane i { position: absolute; top: 0; bottom: 0; min-width: 2px; background: var(--neutral); border-radius: 0 4px 4px 0; }
+.rows .lane i.neg { border-radius: 4px 0 0 4px; }
+.rows .lane i.me { background: var(--forecast); }
+.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px 20px; }
+.tile p:first-child { font-size: 13px; color: var(--ink2); }
+.tile b { font-size: 26px; line-height: 1.25; font-weight: 650; letter-spacing: -.02em; }
+.tile b span { margin-left: 4px; font-size: 14px; font-weight: 400; letter-spacing: 0; color: var(--ink2); }
+.tile p:last-child { font-size: 12.5px; color: var(--ink2); }
+.feeds { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.feed { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--ink2); }
+.feed svg { width: 14px; height: 14px; flex: none; color: var(--good); }
+.feed[data-late] svg { color: var(--crit); }
+.feed[data-late] { color: var(--ink); border-color: var(--crit); }
+.note { margin-top: 12px; font-size: 13px; color: var(--ink2); max-width: 90ch; }
+.empty { padding: 24px 0; font-size: 14px; color: var(--ink2); }
+
+#tip { position: fixed; z-index: 10; min-width: 200px; max-width: 300px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 28px rgba(0,0,0,.18); font-size: 13px; pointer-events: none; }
+#tip .t { margin-bottom: 6px; font-weight: 600; }
+#tip .r { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--ink2); }
+#tip .r strong { margin-left: auto; padding-left: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+#tip .key { width: 12px; }
+
+@media (max-width: 1080px) { .g3 { grid-template-columns: 1fr 1fr; } .g3 > :first-child { grid-column: 1 / -1; } .g2 { grid-template-columns: 1fr; } .tiles { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 680px) { .wrap { padding: 0 16px 32px; } .g3 { grid-template-columns: 1fr; } .card { padding: 16px; } .tiles { grid-template-columns: repeat(2, 1fr); } .seg { width: 100%; overflow-x: auto; } .seg button { flex: 1; min-height: 44px; white-space: nowrap; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="10" fill="var(--ink)"/><path d="M7 23h5v-6h5v-5h5v9h7" fill="none" stroke="var(--surface)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="27" cy="11" r="2.6" fill="var(--actual)"/></svg>
+      <div><h1>SolarPot</h1><p>Day-ahead power price, Germany and Luxembourg</p></div>
+    </div>
+    <div class="status">
+      <span class="pill" id="pill" data-state="wait" role="status"><i class="dot"></i><span id="pillText">Loading</span></span>
+      <span id="clock"></span>
+      <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark"></button>
+    </div>
+  </header>
+  <p id="alert" role="alert" hidden></p>
+
+  <main>
+    <section class="grid g3" aria-label="Summary">
+      <article class="card">
+        <p class="eyebrow">Price now</p>
+        <p class="sub" id="nowWin">&nbsp;</p>
+        <div class="hero"><b id="nowPrice">–</b><span class="unit">€/MWh</span></div>
+        <p class="sub" id="nowCt">&nbsp;</p>
+        <svg class="spark" id="spark" aria-hidden="true"></svg>
+        <dl class="facts" id="nowFacts"></dl>
+      </article>
+      <article class="card">
+        <p class="eyebrow">Latest forecast</p>
+        <p class="sub" id="fdDay">&nbsp;</p>
+        <div class="stat"><b id="fdMean">–</b><span class="unit">€/MWh on average</span></div>
+        <dl class="facts" id="fdFacts"></dl>
+      </article>
+      <article class="card">
+        <p class="eyebrow">Forecast error</p>
+        <p class="sub" id="accSub">&nbsp;</p>
+        <div class="stat"><b id="accMae">–</b><span class="unit">€/MWh per quarter-hour</span></div>
+        <div class="versus" id="accBars"></div>
+        <p class="verdict" id="accVerdict"></p>
+        <dl class="facts" id="accFacts"></dl>
+      </article>
+    </section>
+
+    <div class="bar">
+      <span id="rangeLabel">Days shown in the two charts</span>
+      <div class="seg" role="group" aria-labelledby="rangeLabel" id="ranges">
+        <button type="button" data-range="today">Today</button>
+        <button type="button" data-range="fday">Forecast day</button>
+        <button type="button" data-range="three">3 days</button>
+        <button type="button" data-range="week">7 days</button>
+        <button type="button" data-range="all">2 weeks</button>
+      </div>
+    </div>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="head">
+        <div><h2>Price for each quarter-hour</h2><p class="sub">€/MWh, German time. The forecast is made at 11:10 the day before.</p></div>
+        <div class="legend">
+          <span><i class="key" style="background:var(--actual)"></i>Auction price</span>
+          <span><i class="key" style="background:var(--forecast)"></i>Forecast</span>
+          <span><i class="key box" style="background:var(--band)"></i>Likely range (8 prices in 10)</span>
+        </div>
+      </div>
+      <svg class="chart" id="priceChart" tabindex="0" role="img" aria-label="Auction price and forecast for each quarter-hour. Use the left and right arrow keys to read values; the table below holds the same figures."></svg>
+      <details id="tableBox"><summary>Show the figures of both charts as a table</summary><div class="scroll"><table id="table"></table></div></details>
+    </section>
+
+    <section class="grid g2">
+      <article class="card">
+        <div class="head">
+          <div><h2>Demand, wind and solar</h2><p class="sub">GW, day-ahead forecasts of the grid operators (SMARD)</p></div>
+          <div class="legend">
+            <span><i class="key" style="background:var(--ink2)"></i>Demand</span>
+            <span><i class="key" style="background:var(--wind)"></i>Wind</span>
+            <span><i class="key" style="background:var(--solar)"></i>Solar</span>
+          </div>
+        </div>
+        <svg class="chart" id="gridChart" tabindex="0" role="img" aria-label="Forecast demand, wind and solar power in gigawatts. Use the left and right arrow keys to read values."></svg>
+      </article>
+      <article class="card">
+        <div class="head">
+          <div><h2>Error by day</h2><p class="sub">Mean miss per quarter-hour, €/MWh</p></div>
+          <div class="legend">
+            <span><i class="key box" style="background:var(--forecast)"></i>Forecast</span>
+            <span><i class="key box" style="background:var(--neutral)"></i>Benchmark</span>
+          </div>
+        </div>
+        <svg class="chart" id="dayChart" tabindex="0" role="img" aria-label="Mean error of the forecast and of the benchmark for each day. Use the left and right arrow keys to read values."></svg>
+      </article>
+    </section>
+
+    <section class="grid g2">
+      <article class="card fill">
+        <div class="head"><div><h2 id="heatTitle">Forecast day at a glance</h2><p class="sub" id="heatSub">One cell for each quarter-hour; a column is an hour.</p></div></div>
+        <div id="heat"></div>
+        <div class="scale" id="heatScale"></div>
+      </article>
+      <article class="card">
+        <div class="head"><div><h2>Prices next door</h2><p class="sub" id="nbSub">This quarter-hour, €/MWh</p></div></div>
+        <div class="rows" id="neighbours"></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="head"><div><h2>Market and grid</h2><p class="sub">Latest values the collectors hold</p></div></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="head" style="margin:24px 0 0"><div><h2>Data feeds</h2><p class="sub">When each collector last ran</p></div></div>
+      <div class="feeds" id="feeds"></div>
+      <p class="note">The benchmark repeats the price of the same quarter-hour yesterday (Tuesday to Friday) or a week ago (other days). Prices: energy-charts.info. Demand, wind and solar: SMARD.</p>
+    </section>
+  </main>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+(() => {
+"use strict";
+const TZ = "Europe/Berlin", QUARTER = 900;
+const ZONES = { AT: "Austria", BE: "Belgium", CH: "Switzerland", CZ: "Czechia", DK1: "Denmark West", DK2: "Denmark East",
+  FR: "France", NL: "Netherlands", NO2: "Norway South", PL: "Poland", SE4: "Sweden South" };
+const FEEDS = { energy_charts: "Power prices", smard: "Demand, wind, solar", commodities: "Commodities", weather: "Weather",
+  rhine: "Rhine level", outages: "French outages", gas_storage: "Gas storage", neighbour_prices: "Neighbour prices",
+  hydro: "Reservoirs", worldbank: "World Bank prices", forecast: "Daily forecast", installed_capacity: "Installed capacity" };
+const RAMP = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"];
+const ICON = {
+  up: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  down: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2.5 6.5 6 10l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  ok: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="m3 7.5 2.6 2.6L11 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  late: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 3.2v4.6M7 10.6v.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  sun: '<svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.7 3.7l1.4 1.4M12.9 12.9l1.4 1.4M3.7 14.3l1.4-1.4M12.9 5.1l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  moon: '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M15 10.6A6.5 6.5 0 0 1 7.4 3 6.5 6.5 0 1 0 15 10.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+};
+
+const $ = id => document.getElementById(id);
+function el(tag, attrs = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "text") node.textContent = v; else if (k === "html") node.innerHTML = v; else node.setAttribute(k, v);
+  }
+  node.append(...kids.filter(k => k != null));
+  return node;
+}
+const number = digits => new Intl.NumberFormat("en-GB", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const n2 = number(2), n1 = number(1), n0 = number(0);
+const eur = v => v == null ? "–" : n2.format(v);
+const pct = v => v == null ? "–" : n0.format(v * 100) + "%";
+const date = options => new Intl.DateTimeFormat("en-GB", { timeZone: TZ, ...options });
+const clockFmt = date({ hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const timeFmt = date({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const dayFmt = date({ weekday: "short", day: "numeric", month: "short" });
+const shortDay = date({ weekday: "short", day: "numeric" });
+const dayMonth = date({ day: "numeric", month: "short" });
+
+let D = null, skew = 0, fetched = 0, failed = false, range = "three", shownQuarter = -1;
+try { range = localStorage.getItem("range") || range; } catch (e) {}
+const ms = i => (D.start + i * QUARTER) * 1000;
+const hm = i => timeFmt.format(ms(i));
+const win = i => `${hm(i)}–${hm(i + 1)}`;
+const nowMs = () => Date.now() + skew;
+const nowAt = () => (nowMs() / 1000 - D.start) / QUARTER;
+const nowIndex = () => Math.min(D.n - 1, Math.max(0, Math.floor(nowAt())));
+const dayOf = i => D.days.find(d => i >= d.i0 && i < d.i1) || D.days[D.days.length - 1];
+const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+const known = (values, i0, i1) => values.slice(i0, i1).filter(v => v != null);
+const fact = (label, value, small) => el("div", {}, el("dt", { text: label }), el("dd", {}, value, small ? el("small", { text: small }) : null));
+
+/* ---------- tooltip, shared by every chart ---------- */
+function showTip(content, x, y) {
+  const box = $("tip");
+  box.replaceChildren(el("div", { class: "t", text: content.title }), ...content.rows.map(r => el("div", { class: "r" },
+    r.color ? el("i", { class: "key" + (r.box ? " box" : ""), style: `background:${r.color}` }) : null,
+    el("span", { text: r.label }), el("strong", { text: r.value }))));
+  box.hidden = false;
+  const w = box.offsetWidth, h = box.offsetHeight;
+  box.style.left = Math.max(8, x + 16 + w > innerWidth - 8 ? x - w - 16 : x + 16) + "px";
+  box.style.top = Math.max(8, Math.min(innerHeight - h - 8, y - h / 2)) + "px";
+}
+const hideTip = () => { $("tip").hidden = true; };
+
+/* A chart sets svg.chartApi = { min, max, start, index(px), px(i), show(i), hide(), tip(i) }; this adds pointer and keys. */
+function wire(svg) {
+  const point = e => {
+    const c = svg.chartApi; if (!c) return;
+    svg.at = c.index(e.clientX - svg.getBoundingClientRect().left);
+    c.show(svg.at); showTip(c.tip(svg.at), e.clientX, e.clientY);
+  };
+  const leave = () => { svg.chartApi?.hide(); hideTip(); };
+  const keyed = i => {
+    const c = svg.chartApi, box = svg.getBoundingClientRect();
+    svg.at = Math.min(c.max, Math.max(c.min, i));
+    c.show(svg.at); showTip(c.tip(svg.at), box.left + c.px(svg.at), box.top + box.height / 3);
+  };
+  svg.addEventListener("pointermove", point);
+  svg.addEventListener("pointerdown", point);
+  svg.addEventListener("pointerleave", leave);
+  svg.addEventListener("blur", leave);
+  svg.addEventListener("keydown", e => {
+    const c = svg.chartApi, step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (!c) return;
+    if (e.key === "Escape") return leave();
+    if (!step) return;
+    e.preventDefault();
+    keyed((svg.at ?? c.start) + step * (e.shiftKey ? 4 : 1));
+  });
+  svg.addEventListener("focus", () => { if (svg.chartApi && svg.matches(":focus-visible")) keyed(svg.at ?? svg.chartApi.start); });
+}
+
+function ticks(lo, hi, count) {
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const rough = (hi - lo) / count, power = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * power).find(s => s >= rough);
+  const out = [];
+  for (let v = Math.floor(lo / step) * step; v < hi + step * .999; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+
+/* ---------- line chart over a run of quarter-hours ---------- */
+function lineChart(svg, o) {
+  const W = svg.clientWidth, H = o.height, m = { l: 48, r: 12, t: 16, b: 30 };
+  if (!W) return;
+  const [i0, i1] = o.span, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  let lo = Infinity, hi = -Infinity;
+  const see = v => { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } };
+  for (let i = i0; i < i1; i++) { o.series.forEach(s => see(s.values[i])); if (o.band) { see(o.band.low[i]); see(o.band.high[i]); } }
+  if (lo === Infinity) {
+    svg.chartApi = null;
+    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No figures for these days yet</text>`;
+    return;
+  }
+  if (o.fromZero) lo = Math.min(lo, 0);
+  const yt = ticks(lo, hi, H < 260 ? 3 : 5); lo = yt[0]; hi = yt[yt.length - 1];
+  const x = i => m.l + (i - i0) / (i1 - i0) * pw, y = v => m.t + (hi - v) / (hi - lo) * ph;
+  const f = v => v.toFixed(1);
+  let g = "";
+  for (const t of yt) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${f(y(t))}" y2="${f(y(t))}" stroke="${t === 0 ? "var(--axis)" : "var(--grid)"}"/>` +
+    `<text x="${m.l - 8}" y="${f(y(t) + 4)}" text-anchor="end">${n0.format(t)}</text>`;
+  // time axis: a hairline at each midnight; hours are labelled when few days are shown
+  const days = (i1 - i0) / 96, every = days <= 1.5 ? 12 : days <= 4 ? 24 : 0;
+  const placed = [], wanted = [];  // day names first; an hour is only labelled where it stays clear of them
+  for (const d of D.days) {
+    if (d.i0 < i0 || d.i0 >= i1) continue;
+    if (d.i0 > i0) g += `<line x1="${f(x(d.i0))}" x2="${f(x(d.i0))}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--axis)"/>`;
+    if (days > 1.5) wanted.push([d.i0, shortDay.format(ms(d.i0)), true]);
+    if (every) for (let i = d.i0 + (days > 1.5 ? every : 0); i < Math.min(d.i1, i1); i += every) wanted.push([i, hm(i), false]);
+  }
+  for (const [i, text, strong] of wanted.sort((a, b) => b[2] - a[2])) {
+    if (x(i) > W - m.r - 16 || placed.some(px => Math.abs(px - x(i)) < 52)) continue;
+    placed.push(x(i));
+    g += `<text x="${f(x(i))}" y="${H - 9}" text-anchor="${i === i0 ? "start" : "middle"}"${strong ? ' class="ink"' : ""}>${text}</text>`;
+  }
+  if (o.band) {
+    let d = "", a = null;
+    const close = b => {
+      d += `M${f(x(a))},${f(y(o.band.high[a]))}`;
+      for (let i = a; i <= b; i++) d += `V${f(y(o.band.high[i]))}H${f(x(i + 1))}`;
+      for (let i = b; i >= a; i--) d += `V${f(y(o.band.low[i]))}H${f(x(i))}`;
+      d += "Z"; a = null;
+    };
+    for (let i = i0; i < i1; i++) {
+      const has = o.band.low[i] != null && o.band.high[i] != null;
+      if (has && a == null) a = i;
+      if (a != null && (!has || i === i1 - 1)) close(has ? i : i - 1);
+    }
+    g += `<path d="${d}" fill="var(--band)"/>`;
+  }
+  for (const s of o.series) {
+    let d = "", open = false;
+    for (let i = i0; i < i1; i++) {
+      const v = s.values[i];
+      if (v == null) { open = false; continue; }
+      if (o.steps) d += (open ? `V${f(y(v))}` : `M${f(x(i))},${f(y(v))}`) + `H${f(x(i + 1))}`;
+      else d += `${open ? "L" : "M"}${f(x(i + .5))},${f(y(v))}`;
+      open = true;
+    }
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  const at = nowAt();
+  if (at > i0 && at < i1) g += `<line x1="${f(x(at))}" x2="${f(x(at))}" y1="${m.t - 4}" y2="${m.t + ph}" stroke="var(--ink2)"/>` +
+    `<text x="${f(Math.min(x(at) + 6, W - 30))}" y="${m.t + 6}" class="ink">now</text>`;
+  svg.innerHTML = g + '<g class="hover"></g>';
+  const hover = svg.lastChild;
+  svg.chartApi = {
+    min: i0, max: i1 - 1, start: Math.min(i1 - 1, Math.max(i0, nowIndex())),
+    index: px => Math.min(i1 - 1, Math.max(i0, i0 + Math.floor((px - m.l) / pw * (i1 - i0)))),
+    px: i => x(i + .5),
+    hide: () => { hover.innerHTML = ""; },
+    show: i => {
+      hover.innerHTML = `<rect x="${f(x(i))}" y="${m.t}" width="${f(Math.max(1, pw / (i1 - i0)))}" height="${ph}" fill="var(--wash)"/>` +
+        `<line x1="${f(x(i + .5))}" x2="${f(x(i + .5))}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--ink2)"/>` +
+        o.series.filter(s => s.values[i] != null).map(s =>
+          `<circle cx="${f(x(i + .5))}" cy="${f(y(s.values[i]))}" r="5" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`).join("");
+    },
+    tip: o.tip,
+  };
+}
+
+/* ---------- pairs of columns: forecast against benchmark, one pair per day ---------- */
+function dayChart(svg) {
+  const W = svg.clientWidth, H = 240, m = { l: 48, r: 12, t: 16, b: 30 };
+  if (!W) return;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  const days = D.days.filter(d => d.score && d.score.benchmark != null);
+  if (!days.length) {
+    svg.chartApi = null;
+    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No forecast has a published price yet</text>`;
+    return;
+  }
+  const pw = W - m.l - m.r, ph = H - m.t - m.b, slot = pw / days.length, bar = Math.min(24, Math.max(3, slot / 2 - 5));
+  const yt = ticks(0, Math.max(...days.flatMap(d => [d.score.mae, d.score.benchmark])), 4), hi = yt[yt.length - 1];
+  const y = v => m.t + (hi - v) / hi * ph, f = v => v.toFixed(1), mid = k => m.l + (k + .5) * slot;
+  const column = (cx, v, color) => { // a rounded top, a square foot on the baseline
+    const top = y(v), r = Math.min(4, bar / 2, m.t + ph - top);
+    return `<path d="M${f(cx)},${f(m.t + ph)}V${f(top + r)}q0,${-r} ${r},${-r}h${f(bar - 2 * r)}q${r},0 ${r},${r}V${f(m.t + ph)}Z" fill="${color}"/>`;
+  };
+  let g = "";
+  for (const t of yt) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${f(y(t))}" y2="${f(y(t))}" stroke="${t === 0 ? "var(--axis)" : "var(--grid)"}"/>` +
+    `<text x="${m.l - 8}" y="${f(y(t) + 4)}" text-anchor="end">${n0.format(t)}</text>`;
+  g += '<g class="hover"></g>';
+  days.forEach((d, k) => {
+    g += column(mid(k) - bar - 1, d.score.mae, "var(--forecast)") + column(mid(k) + 1, d.score.benchmark, "var(--neutral)");
+    if (slot >= 46) g += `<text x="${f(mid(k))}" y="${H - 9}" text-anchor="middle">${dayMonth.format(ms(d.i0))}</text>`;
+    else if (k === 0 || k === days.length - 1) g += `<text x="${f(mid(k))}" y="${H - 9}" text-anchor="${k ? "end" : "start"}">${dayMonth.format(ms(d.i0))}</text>`;
+  });
+  svg.innerHTML = g;
+  const hover = svg.querySelector(".hover");
+  svg.chartApi = {
+    min: 0, max: days.length - 1, start: days.length - 1,
+    index: px => Math.min(days.length - 1, Math.max(0, Math.floor((px - m.l) / slot))),
+    px: mid,
+    hide: () => { hover.innerHTML = ""; },
+    show: k => { hover.innerHTML = `<rect x="${f(m.l + k * slot)}" y="${m.t}" width="${f(slot)}" height="${ph}" fill="var(--wash)"/>`; },
+    tip: k => ({ title: dayFmt.format(ms(days[k].i0)), rows: [
+      { label: "Forecast", value: eur(days[k].score.mae), color: "var(--forecast)", box: true },
+      { label: "Benchmark", value: eur(days[k].score.benchmark), color: "var(--neutral)", box: true },
+      { label: "Inside likely range", value: pct(days[k].score.inside) }] }),
+  };
+}
+
+/* ---------- the three cards at the top ---------- */
+function delta(to, from) {
+  if (to == null || from == null) return null;
+  const d = to - from;
+  return el("span", { class: "delta", html: (d > 0 ? ICON.up : d < 0 ? ICON.down : "") }, document.createTextNode(n2.format(Math.abs(d))));
+}
+function renderNow() {
+  const i = nowIndex(), day = dayOf(i), a = D.actual[i], f = D.forecast[i], next = D.actual[i + 1];
+  $("nowWin").textContent = `${dayFmt.format(ms(i))}, ${win(i)}`;
+  $("nowPrice").textContent = eur(a);
+  $("nowCt").textContent = a == null ? "The auction price for this quarter-hour is not in the database" : `${n1.format(a / 10)} ct/kWh`;
+  const today = known(D.actual, day.i0, day.i1);
+  $("nowFacts").replaceChildren(
+    fact("Our forecast for it", eur(f), f == null || a == null ? null : f === a ? "exact" : `${eur(Math.abs(f - a))} too ${f > a ? "high" : "low"}`),
+    fact(`Next, ${i + 1 < D.n ? win(i + 1) : ""}`, el("span", {}, eur(next), delta(next, a)),
+      D.forecast[i + 1] == null ? null : `forecast ${eur(D.forecast[i + 1])}`),
+    fact("Today, low to high", today.length ? `${eur(Math.min(...today))} to ${eur(Math.max(...today))}` : "–",
+      today.length ? `mean ${eur(mean(today))}` : null));
+  // today's prices as one small line, with a dot on this quarter-hour
+  const svg = $("spark"), W = svg.clientWidth, H = 56;
+  if (!W || today.length < 2) { svg.innerHTML = ""; return; }
+  const lo = Math.min(...today), hi = Math.max(...today), n = day.i1 - day.i0;
+  const x = k => 5 + (k + .5) / n * (W - 10), y = v => 6 + (hi - v) / (hi - lo || 1) * (H - 12);
+  let d = "", open = false;
+  for (let k = 0; k < n; k++) {
+    const v = D.actual[day.i0 + k];
+    if (v == null) { open = false; continue; }
+    d += `${open ? "L" : "M"}${x(k).toFixed(1)},${y(v).toFixed(1)}`; open = true;
+  }
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="var(--neutral)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+    (a == null ? "" : `<circle cx="${x(i - day.i0).toFixed(1)}" cy="${y(a).toFixed(1)}" r="5" fill="var(--actual)" stroke="var(--surface)" stroke-width="2"/>`);
+}
+
+function block(values, i0, i1, length, pick) { // the run of `length` quarter-hours with the lowest or highest mean
+  let best = null;
+  for (let i = i0; i + length <= i1; i++) {
+    const run = values.slice(i, i + length);
+    if (run.some(v => v == null)) continue;
+    const m = mean(run);
+    if (!best || pick(m, best.mean)) best = { i, mean: m };
+  }
+  return best && [`${hm(best.i)}–${hm(best.i + length)}`, `mean ${eur(best.mean)}`];
+}
+function countdown(seconds) {
+  const h = Math.floor(seconds / 3600), min = Math.floor(seconds % 3600 / 60);
+  return h ? `in ${h} h ${min} min` : `in ${min} min`;
+}
+function renderForecastDay() {
+  const fd = D.forecast_day, facts = [];
+  if (!fd) {
+    $("fdDay").textContent = "No forecast stored yet";
+    $("fdMean").textContent = "–";
+  } else {
+    const values = known(D.forecast, fd.i0, fd.i1), chance = Math.max(...known(D.p_negative, fd.i0, fd.i1), 0);
+    const peak = D.p_negative.indexOf(chance, fd.i0);
+    $("fdDay").textContent = `For ${dayFmt.format(ms(fd.i0))}, ${values.length} quarter-hours`;
+    $("fdMean").textContent = eur(mean(values));
+    facts.push(fact("Low to high", `${eur(Math.min(...values))} to ${eur(Math.max(...values))}`));
+    const cheap = block(D.forecast, fd.i0, fd.i1, 8, (a, b) => a < b), dear = block(D.forecast, fd.i0, fd.i1, 8, (a, b) => a > b);
+    if (cheap) facts.push(fact("Cheapest 2 hours", cheap[0], cheap[1]), fact("Dearest 2 hours", dear[0], dear[1]));
+    facts.push(fact("Price below zero", chance < .1 ? "Unlikely" : `${pct(chance)} chance`, chance < .1 ? null : `highest around ${hm(peak)}`));
+    const out = known(D.actual, fd.i0, fd.i1);
+    facts.push(out.length ? fact("Auction result", `mean ${eur(mean(out))}`, fd.score ? `we missed by ${eur(fd.score.mae)} on average` : null)
+      : fact("Auction result", "Not out yet", "published around 12:45"));
+    const made = Date.parse(fd.issued_at);
+    facts.push(fact("Made", `${dayFmt.format(made)}, ${timeFmt.format(made)}`));
+  }
+  facts.push(fact("Next forecast", `${dayFmt.format(D.next_run * 1000)}, 11:10`, countdown(D.next_run - nowMs() / 1000)));
+  $("fdFacts").replaceChildren(...facts);
+}
+
+function renderAccuracy() {
+  const week = D.score.week, live = D.score.live, s = week || live, facts = [];
+  $("accSub").textContent = !s ? "No forecast has a published price yet" : week ? "Mean miss over the last 7 days" : "Mean miss over all live days";
+  $("accMae").textContent = s ? eur(s.mae) : "–";
+  const bars = $("accBars"), verdict = $("accVerdict");
+  bars.replaceChildren(); verdict.replaceChildren();
+  if (s && s.benchmark != null) {
+    const top = Math.max(s.mae, s.benchmark);
+    for (const [name, v, cls] of [["Forecast", s.mae, "ours"], ["Benchmark", s.benchmark, ""]])
+      bars.append(el("span", { text: name }), el("div", { class: "track" }, el("i", { class: cls, style: `width:${(v / top * 100).toFixed(1)}%` })), el("strong", { text: eur(v) }));
+    const cut = 1 - s.mae / s.benchmark;
+    verdict.append(el("strong", { text: cut >= 0 ? `${pct(cut)} smaller` : `${pct(-cut)} larger` }), " than the benchmark's error.");
+    facts.push(fact("Prices inside the likely range", pct(s.inside), "the aim is 80%"));
+  }
+  if (live && D.score.since) facts.push(fact(`All live days since ${dayMonth.format(Date.parse(D.score.since))}`, eur(live.mae),
+    `benchmark ${eur(live.benchmark)}, ${n0.format(live.n)} quarter-hours`));
+  if (D.backtest) facts.push(fact("12-month test, hourly", eur(D.backtest.mae), `benchmark ${eur(D.backtest.benchmark)}`));
+  $("accFacts").replaceChildren(...facts);
+}
+
+/* ---------- charts ---------- */
+function span() {
+  const days = D.days, last = days.length - 1, today = days.indexOf(dayOf(nowIndex()));
+  const fd = D.forecast_day ? days.findIndex(d => d.day === D.forecast_day.day) : today;
+  const cut = (a, b) => [days[Math.max(0, a)].i0, days[Math.min(last, b)].i1];
+  return { today: cut(today, today), fday: cut(fd, fd), three: cut(today - 1, today + 1), week: cut(today - 6, last) }[range] || [0, D.n];
+}
+function renderCharts() {
+  const s = span(), when = i => `${dayFmt.format(ms(i))}, ${win(i)}`;
+  lineChart($("priceChart"), {
+    span: s, height: innerWidth < 680 ? 280 : 380, steps: true,
+    series: [{ values: D.forecast, color: "var(--forecast)" }, { values: D.actual, color: "var(--actual)" }],
+    band: { low: D.low, high: D.high },
+    tip: i => {
+      const a = D.actual[i], f = D.forecast[i], rows = [
+        { label: "Auction price", value: a == null ? "not out yet" : eur(a), color: "var(--actual)" },
+        { label: "Forecast", value: eur(f), color: "var(--forecast)" }];
+      if (a != null && f != null) rows.push({ label: "Miss", value: `${eur(Math.abs(f - a))} too ${f >= a ? "high" : "low"}` });
+      if (D.low[i] != null) rows.push({ label: "Likely range", value: `${n0.format(D.low[i])} to ${n0.format(D.high[i])}`, color: "var(--band)", box: true });
+      if (D.p_negative[i] >= .01) rows.push({ label: "Chance below zero", value: pct(D.p_negative[i]) });
+      return { title: when(i), rows };
+    },
+  });
+  lineChart($("gridChart"), {
+    span: s, height: 240, fromZero: true,
+    series: [{ values: D.demand, color: "var(--ink2)" }, { values: D.wind, color: "var(--wind)" }, { values: D.solar, color: "var(--solar)" }],
+    tip: i => ({ title: when(i), rows: [["Demand", D.demand, "var(--ink2)"], ["Wind", D.wind, "var(--wind)"], ["Solar", D.solar, "var(--solar)"]]
+      .map(([label, values, color]) => ({ label, color, value: values[i] == null ? "–" : `${n1.format(values[i])} GW` })) }),
+  });
+  dayChart($("dayChart"));
+  if ($("tableBox").open) renderTable();
+}
+function renderTable() {
+  const [i0, i1] = span(), body = el("tbody");
+  for (let i = i0; i < i1; i++) {
+    const a = D.actual[i], f = D.forecast[i];
+    body.append(el("tr", {}, ...[`${shortDay.format(ms(i))}, ${win(i)}`, eur(a), eur(f), a == null || f == null ? "–" : eur(f - a),
+      eur(D.low[i]), eur(D.high[i]), ...[D.demand, D.wind, D.solar].map(v => v[i] == null ? "–" : n1.format(v[i]))].map(text => el("td", { text }))));
+  }
+  $("table").replaceChildren(el("thead", {}, el("tr", {}, ...["Quarter-hour", "Auction price", "Forecast", "Forecast minus price",
+    "Range from", "Range to", "Demand, GW", "Wind, GW", "Solar, GW"].map(text => el("th", { text, scope: "col" })))), body);
+}
+
+/* ---------- forecast day as a grid of cells ---------- */
+function renderHeat() {
+  const fd = D.forecast_day, box = $("heat"), scale = $("heatScale");
+  box.replaceChildren(); scale.replaceChildren();
+  if (!fd) { box.append(el("p", { class: "empty", text: "No forecast stored yet" })); return; }
+  $("heatTitle").textContent = `Forecast for ${dayFmt.format(ms(fd.i0))}`;
+  const values = known(D.forecast, fd.i0, fd.i1), lo = Math.min(...values), hi = Math.max(...values);
+  const dark = document.documentElement.dataset.theme === "dark", ramp = dark ? [...RAMP].reverse() : RAMP;  // low values stay close to the surface
+  $("heatSub").textContent = `One cell for each quarter-hour; a column is an hour. ${dark ? "Brighter" : "Darker"} means dearer.`;
+  const hours = (fd.i1 - fd.i0) / 4, grid = el("div", { class: "heat", style: `grid-template-columns:auto repeat(${hours},minmax(0,1fr))` });
+  grid.append(el("span"));
+  for (let h = 0; h < hours; h++) grid.append(el("span", { text: h % 3 ? "" : hm(fd.i0 + 4 * h).slice(0, 2) }));
+  for (let q = 0; q < 4; q++) {
+    grid.append(el("span", { class: "q", text: ":" + String(q * 15).padStart(2, "0") }));
+    for (let h = 0; h < hours; h++) {
+      const i = fd.i0 + 4 * h + q, v = D.forecast[i];
+      grid.append(el("i", v == null ? {} : { "data-i": i, style: `background:${ramp[Math.round((v - lo) / (hi - lo || 1) * (ramp.length - 1))]}` }));
+    }
+  }
+  box.append(grid);
+  scale.append(el("span", { text: eur(lo) }), el("i", { style: `background:linear-gradient(90deg,${ramp.join(",")})` }), el("span", { text: `${eur(hi)} €/MWh` }));
+}
+$("heat").addEventListener("pointermove", e => {
+  const i = e.target.dataset && e.target.dataset.i;
+  if (i == null) return hideTip();
+  showTip({ title: win(+i), rows: [{ label: "Forecast", value: eur(D.forecast[+i]), color: "var(--forecast)" },
+    ...(D.actual[+i] == null ? [] : [{ label: "Auction price", value: eur(D.actual[+i]), color: "var(--actual)" }])] }, e.clientX, e.clientY);
+});
+$("heat").addEventListener("pointerleave", hideTip);
+
+/* ---------- the rest ---------- */
+function renderNeighbours() {
+  const i = nowIndex(), box = $("neighbours");
+  const all = D.neighbours.filter(z => z.price != null).map(z => ({ name: ZONES[z.zone] || z.zone, price: z.price }));
+  if (D.actual[i] != null) all.push({ name: "Germany–Luxembourg", price: D.actual[i], me: true });
+  all.sort((a, b) => b.price - a.price);
+  $("nbSub").textContent = `Day-ahead price for ${win(i)}, €/MWh`;
+  if (!all.length) return box.replaceChildren(el("p", { class: "empty", style: "grid-column:1/-1", text: "No prices for this quarter-hour yet" }));
+  const lo = Math.min(0, ...all.map(z => z.price)), hi = Math.max(0, ...all.map(z => z.price)), width = hi - lo || 1;
+  box.replaceChildren(...all.flatMap(z => [
+    el("span", z.me ? { class: "me", text: z.name } : { text: z.name }),
+    el("div", { class: "lane" }, el("i", { class: (z.price < 0 ? "neg " : "") + (z.me ? "me" : ""),
+      style: `left:${((Math.min(z.price, 0) - lo) / width * 100).toFixed(1)}%;width:${(Math.abs(z.price) / width * 100).toFixed(1)}%` })),
+    el("strong", { text: eur(z.price) })]));
+}
+function renderTiles() {
+  const m = D.market, g = m.grid, tiles = [];
+  const tile = (label, value, unit, note) => tiles.push(el("div", { class: "tile" }, el("p", { text: label }),
+    el("b", { text: value }, el("span", { text: unit })), el("p", { text: note })));
+  const asOf = stamp => dayMonth.format(Date.parse(stamp));
+  if (m.gas) tile("Gas", eur(m.gas.value), "€/MWh", `THE hub, ${asOf(m.gas.ts)}`);
+  if (m.co2) tile("CO2 allowance", eur(m.co2.value), "€/t", `German auction, ${asOf(m.co2.ts)}`);
+  if (g) {
+    const measured = `measured ${timeFmt.format(Date.parse(g.ts))}`, wind = g.wind_onshore + g.wind_offshore;
+    tile("Demand", n1.format(g.load), "GW", measured);
+    tile("Wind", n1.format(wind), "GW", `${n1.format(g.wind_offshore)} GW of it at sea`);
+    tile("Solar", n1.format(g.solar), "GW", measured);
+    tile("Wind and solar", n0.format((wind + g.solar) / g.load * 100), "% of demand", measured);
+  }
+  $("tiles").replaceChildren(...(tiles.length ? tiles : [el("p", { class: "empty", text: "No values yet" })]));
+}
+function ago(seconds) {
+  if (seconds < 90) return "just now";
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 36 * 3600) return `${Math.round(seconds / 3600)} h ago`;
+  return `${Math.round(seconds / 86400)} days ago`;
+}
+function renderFeeds() {
+  $("feeds").replaceChildren(...D.feeds.map(feed => {
+    const late = feed.age == null || feed.age > 2 * feed.every + 900;
+    return el("span", { class: "feed", ...(late ? { "data-late": "" } : {}), html: late ? ICON.late : ICON.ok },
+      document.createTextNode(`${FEEDS[feed.name] || feed.name}: ${feed.age == null ? "never ran" : ago(feed.age)}${late && feed.age != null ? ", late" : ""}`));
+  }));
+}
+
+function render() {
+  shownQuarter = nowIndex();
+  for (const b of $("ranges").children) b.setAttribute("aria-pressed", String(b.dataset.range === range));
+  renderNow(); renderForecastDay(); renderAccuracy(); renderCharts(); renderHeat(); renderNeighbours(); renderTiles(); renderFeeds();
+}
+function status() {
+  const pill = $("pill"), age = (Date.now() - fetched) / 1000;
+  pill.dataset.state = failed ? "down" : D ? "live" : "wait";
+  $("pillText").textContent = failed ? (D ? `No connection, figures from ${ago(age)}` : "No connection") : D ? `Live, updated ${age < 5 ? "now" : Math.round(age) + " s ago"}` : "Loading";
+  $("alert").hidden = !(failed && !D);
+  $("alert").textContent = "The dashboard server does not answer. The page tries again every minute.";
+  $("clock").textContent = clockFmt.format(nowMs()) + " German time";
+}
+async function load() {
+  try {
+    const reply = await fetch("/api", { cache: "no-store" });
+    if (!reply.ok) throw new Error(reply.status);
+    D = await reply.json();
+    skew = D.now * 1000 - Date.now(); fetched = Date.now(); failed = false;
+    render();
+  } catch (e) { failed = true; }
+  status();
+}
+
+$("ranges").addEventListener("click", e => {
+  if (!e.target.dataset.range || !D) return;
+  range = e.target.dataset.range;
+  try { localStorage.setItem("range", range); } catch (err) {}
+  for (const b of $("ranges").children) b.setAttribute("aria-pressed", String(b === e.target));
+  renderCharts();
+});
+$("tableBox").addEventListener("toggle", () => { if ($("tableBox").open && D) renderTable(); });
+const themeButton = $("theme");
+const paintTheme = () => { themeButton.innerHTML = document.documentElement.dataset.theme === "dark" ? ICON.sun : ICON.moon; };
+themeButton.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (err) {}
+  paintTheme(); if (D) renderHeat();
+});
+paintTheme();
+["priceChart", "gridChart", "dayChart"].forEach(id => wire($(id)));
+let resizing = 0;
+new ResizeObserver(() => { cancelAnimationFrame(resizing); resizing = requestAnimationFrame(() => { if (D) { renderNow(); renderCharts(); } }); }).observe(document.querySelector("main"));
+setInterval(() => { status(); if (D && nowIndex() !== shownQuarter) render(); }, 1000);
+setInterval(() => { if (!document.hidden) load(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - fetched > 60000) load(); });
+status(); load();
+})();
+</script>
+</body>
+</html>
